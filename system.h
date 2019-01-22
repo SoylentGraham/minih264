@@ -79,7 +79,7 @@ bool DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 bool EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 bool LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 
-HANDLE thread_create(LPTHREAD_START_ROUTINE lpStartAddress, void *lpParameter);
+HANDLE h264_thread_create(LPTHREAD_START_ROUTINE lpStartAddress, void *lpParameter);
 
 #ifdef __cplusplus
 }

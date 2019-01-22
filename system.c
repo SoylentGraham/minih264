@@ -340,7 +340,7 @@ bool LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection)
     return TRUE;
 }
 
-HANDLE thread_create(LPTHREAD_START_ROUTINE lpStartAddress, void *lpParameter)
+HANDLE h264_thread_create(LPTHREAD_START_ROUTINE lpStartAddress, void *lpParameter)
 {
     pthread_t *t = (pthread_t *)malloc(sizeof(*t));
     if (!t)

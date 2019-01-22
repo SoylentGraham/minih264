@@ -69,7 +69,7 @@ void *h264e_thread_pool_init(int max_threads)
         h264e_thread_t *t = threads + i;
         t->event_start = event_create(0, 0);
         t->event_done  = event_create(0, 0);
-        t->thread = thread_create(minih264_thread_func, t);
+        t->thread = h264_thread_create(minih264_thread_func, t);
     }
     return threads;
 }
