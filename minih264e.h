@@ -1223,7 +1223,7 @@ static void h264e_bs_put_sgolomb_sse2(bs_t *bs, int val)
 
 static void h264e_bs_init_bits_sse2(bs_t *bs, void *data)
 {
-    bs->origin = data;
+    bs->origin = (bs_item_t*)data;
     bs->buf = bs->origin;
     bs->shift = BS_BITS;
     bs->cache = 0;
@@ -10983,13 +10983,26 @@ static void rc_mb_end(h264e_enc_t *enc)
 /************************************************************************/
 
 #define ALIGN_128BIT(p) (void *)((uintptr_t)(((char*)(p)) + 15) & ~(uintptr_t)15)
-#define ALLOC(ptr, size) p = ALIGN_128BIT(p); if (enc) ptr = (void *)p; p += size;
+//#define ALLOC(type, ptr, size) p = ALIGN_128BIT(p); if (enc) ptr = (type *)p; p += size;
+
+unsigned char* ALLOC(unsigned char** pp,int size)
+{
+	unsigned char* p = *pp;
+	unsigned char* ptr;
+	p = (unsigned char*)ALIGN_128BIT(p);
+	//if (enc)
+		ptr = p;
+	p += size;
+	*pp = p;
+	return ptr;
+}
 
 /**
 *   Internal allocator for persistent RAM
 */
-static int enc_alloc(h264e_enc_t *enc, const H264E_create_param_t *par, unsigned char *p, int inp_buf_flag)
+static int enc_alloc(h264e_enc_t *enc, const H264E_create_param_t *par, void *pvoid, int inp_buf_flag)
 {
+	unsigned char* p = (unsigned char*)pvoid;
     unsigned char *p0 = p;
     int nmbx = (par->width  + 15) >> 4;
     int nmby = (par->height + 15) >> 4;
@@ -10997,12 +11010,12 @@ static int enc_alloc(h264e_enc_t *enc, const H264E_create_param_t *par, unsigned
 #if H264E_ENABLE_DENOISE
     nref_frames += !!par->temporal_denoise_flag;
 #endif
-    ALLOC(enc->ref.yuv[0], ((nmbx + 2) * (nmby + 2) * 384) * nref_frames);
+    enc->ref.yuv[0] = ALLOC(&p, ((nmbx + 2) * (nmby + 2) * 384) * nref_frames);
     (void)inp_buf_flag;
 #if H264E_SVC_API
     if (inp_buf_flag)
     {
-        ALLOC(enc->inp.yuv[0], ((nmbx)*(nmby)*384)); /* input buffer for base laeyr */
+        enc->inp.yuv[0] = ALLOC(&p, ((nmbx)*(nmby)*384)); /* input buffer for base laeyr */
     }
 #endif
     return (int)((p - p0) + 15) & ~15u;
@@ -11011,21 +11024,22 @@ static int enc_alloc(h264e_enc_t *enc, const H264E_create_param_t *par, unsigned
 /**
 *   Internal allocator for scratch RAM
 */
-static int enc_alloc_scratch(h264e_enc_t *enc, const H264E_create_param_t *par, unsigned char *p)
+static int enc_alloc_scratch(h264e_enc_t *enc, const H264E_create_param_t *par, void *pvoid)
 {
+	unsigned char* p = (unsigned char*)pvoid;
     unsigned char *p0 = p;
     int nmbx = (par->width  + 15) >> 4;
     int nmby = (par->height + 15) >> 4;
-    ALLOC(enc->scratch, sizeof(scratch_t));
-    ALLOC(enc->out, nmbx * nmby * (384 + 2 + 10) * 3/2);
+    enc->scratch = (scratch_t*)ALLOC( &p, sizeof(scratch_t));
+    enc->out = ALLOC( &p, nmbx * nmby * (384 + 2 + 10) * 3/2);
 
-    ALLOC(enc->nnz, nmbx*8 + 8);
-    ALLOC(enc->mv_pred, (nmbx*4 + 8)*sizeof(point_t));
-    ALLOC(enc->i4x4mode, nmbx*4 + 4);
-    ALLOC(enc->df.df_qp, nmbx);
-    ALLOC(enc->df.mb_type, nmbx);
-    ALLOC(enc->df.df_nzflag, nmbx);
-    ALLOC(enc->top_line, nmbx*32 + 32 + 16);
+	enc->nnz = ALLOC( &p, nmbx*8 + 8);
+    enc->mv_pred = (point_t*)ALLOC( &p, (nmbx*4 + 8)*sizeof(point_t));
+    enc->i4x4mode = (int32_t*)ALLOC( &p, nmbx*4 + 4);
+    enc->df.df_qp = ALLOC( &p, nmbx);
+    enc->df.mb_type = (int8_t*)ALLOC( &p, nmbx);
+    enc->df.df_nzflag = ALLOC( &p, nmbx);
+    enc->top_line = ALLOC( &p, nmbx*32 + 32 + 16);
     return (int)(p - p0);
 }
 
@@ -11196,7 +11210,9 @@ int H264E_init(h264e_enc_t *enc, const H264E_create_param_t *opt)
         opt_next.vbv_size_bytes <<= 2;
 
         H264E_sizeof_one(&enc_curr->param, &sizeof_persist, &sizeof_scratch, 1);
-        enc_curr = enc_curr->enc_next = (char *)enc_curr + sizeof_persist;
+		char* NextPtr = (char *)enc_curr + sizeof_persist;
+		enc_curr->enc_next = (h264e_enc_t*)NextPtr;
+		enc_curr = (h264e_enc_t*)NextPtr;
 
         ret = H264E_init_one(enc_curr, &opt_next, 1);
         if (ret)
@@ -11368,7 +11384,7 @@ static int H264E_encode_one(H264E_persist_t *enc, const H264E_run_param_t *opt,
             enc->frame.nmby = nmby;
             for (i = 0; i < 3; i++)
             {
-                enc->dec.yuv[i] = savep[i];
+                enc->dec.yuv[i] = (unsigned char*)savep[i];
             }
         } else
 #endif
@@ -11473,11 +11489,11 @@ int H264E_encode(H264E_persist_t *enc, H264E_scratch_t *scratch, const H264E_run
     i = enc_alloc_scratch(enc, &enc->param, (unsigned char*)scratch);
 #if H264E_SVC_API
     {
-        H264E_persist_t *e = enc->enc_next;
+        H264E_persist_t *e = (H264E_persist_t*)enc->enc_next;
         while (e)
         {
             i += enc_alloc_scratch(e, &enc->param, ((unsigned char*)scratch) + i);
-            e = e->enc_next;
+            e = (H264E_persist_t*)e->enc_next;
         }
     }
 #endif
@@ -11580,7 +11596,7 @@ int H264E_encode(H264E_persist_t *enc, H264E_scratch_t *scratch, const H264E_run
 #if H264E_SVC_API
         if (enc->param.num_layers > 1)
         {
-            H264E_persist_t *enc_base = enc->enc_next;
+            H264E_persist_t *enc_base = (H264E_persist_t*)enc->enc_next;
             enc_base->sps.pic_init_qp = pic_init_qp;
             enc_base->next_idr_pic_id ^= 1;
             enc_base->frame.num = 0;
@@ -11616,7 +11632,7 @@ int H264E_encode(H264E_persist_t *enc, H264E_scratch_t *scratch, const H264E_run
 #if H264E_SVC_API
     if (enc->param.num_layers > 1)
     {
-        H264E_persist_t *enc_base = enc->enc_next;
+        H264E_persist_t *enc_base = (H264E_persist_t*)enc->enc_next;
         int sh = 0;
 
         enc_base->run_param = enc->run_param;
